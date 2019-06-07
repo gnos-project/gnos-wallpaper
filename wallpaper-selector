@@ -1,0 +1,111 @@
+#!/bin/bash
+# NAME  GNOS wallpaper-selector
+# DESC  install wallpaper from reddit
+# AUTH  elias@gnos.in
+# DEPS  yad jq wget pkill gsettings
+
+
+# CONF: defaults
+PAGES=1
+SORT_BY=hot
+SUBREDDIT=r/AutumnPorn+EarthPorn+JunglePorn+desertporn+spaceporn # https://scrolller.com/
+USER_AGENT='Mozilla/5.0 (Windows NT 6.2; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/29.0.1547.2 Safari/537.36'
+
+
+# FUNC
+function Usage()
+{
+    cat <<EOF
+USAGE: $SELF_NAME [OPTS] ...
+  -p  Number of pages to query
+  -r  Subreddit, e.g. 'museum+ArtPorn'
+  -f  Filter by title regex, e.g. '[^0-9a-z\\\\[]+1[4-7][0-9][0-9][^0-9a-z\\\\]]'
+  -s  Sort, e.g. 'hot', 'new', 'controversial', 'top', 'rising'
+  -h  This help screen
+EOF
+    exit $1
+}
+
+function SetWallpaper() # $1:URL $2:CACHE_DIR $3:CALLER_PID
+{
+    local name=$( echo -n "$( basename "$1" )" | tr -c '._[:alnum:]' '-' 2>/dev/null )
+
+    # Clean cache
+    [[ -n "$CACHE_DIR" && -d "$CACHE_DIR" ]] && rm "$CACHE_DIR/"*
+
+    # Download wallpaper
+    wget --quiet -O "$CACHE_DIR/$name" "$1"
+
+    # Set wallpaper
+    gsettings set org.gnome.desktop.background picture-uri "file://$CACHE_DIR/$name"
+}
+
+
+# INIT
+SELF_NAME="$( basename "$( readlink -f "$BASH_SOURCE" )" .sh )"
+CACHE_DIR="$HOME/.cache/$SELF_NAME"
+for dep in yad jq wget pkill gsettings; do which $dep &>/dev/null || { echo "Missing dependency: $dep"; exit;} ; done
+declare -a THUMBNAILS YAD_ICONS
+
+
+# ARGS
+while getopts ":h :r: :s: :f: :p:" ARG ; do
+    case ${ARG} in
+        h)  Usage ;;
+        r)  SUBREDDIT="r/${OPTARG}" ;;
+        s)  SORT_BY=${OPTARG} ;;
+        f)  TITLE_REGEX="${OPTARG}" ;;
+        p)  PAGES="${OPTARG}" ;;
+        *)  Usage 1 ;;
+    esac
+done
+shift $((OPTIND-1))
+[[ $# -ne 0 ]] && Usage 1
+
+
+# MAIN
+JSON_URL="https://www.reddit.com/${SUBREDDIT}/${SORT_BY}.json?limit=100"
+mkdir -p "$CACHE_DIR"
+
+for ((i=1; i<=PAGES ; i++)); do
+    echo "Querying ${SUBREDDIT} #$i"
+    [[ $next == null ]] && break
+    ## Download data
+    JSON_CONTENT=$( wget --quiet --output-document=- --user-agent="${USER_AGENT}" "${JSON_URL}&after=$next" )
+    # Parse Thumbnails
+    readarray -t THUMBNAILS2 <<< "$( jq --raw-output '.data.children[] '"${TITLE_REGEX+|select(.data.title|test(\"$TITLE_REGEX\";\"i\"))}"' | "\(.data.thumbnail)"' <<<"$JSON_CONTENT" )"
+    # Parse Args
+    readarray -t YAD_ICONS2 <<< "$( jq --raw-output 'def basename: split("/") | .[-1] ; .data.children[] '"${TITLE_REGEX+|select(.data.title|test(\"$TITLE_REGEX\";\"i\"))}"' | "\(.data.title[:32])", "\(.data.title)", "'"$CACHE_DIR"'/" + (.data.thumbnail|basename), "bash -c \"SetWallpaper \\\"\(.data.url)\\\"\"", "false"' <<<"$JSON_CONTENT" )"
+    if [[ -n "$THUMBNAILS2" ]] ; then
+        THUMBNAILS+=( "${THUMBNAILS2[@]}" )
+        YAD_ICONS+=( "${YAD_ICONS2[@]}" )
+    fi
+    next="$( jq --raw-output '.data.after' <<<"$JSON_CONTENT" )"
+done
+
+if [[ -z "${THUMBNAILS2[@]}" ]] ; then
+    echo "No matches found"
+    exit 1
+fi
+# DBG set -x ; cat <<<"$(printf "%s\n" "${YAD_ICONS[@]}")" ; cat <<<"$(printf "%s\n" "${THUMBNAILS[@]}")" ; exit
+
+## Download thumbnails
+echo Downloading $( wc -l <<<"$(printf "%s\n" "${THUMBNAILS[@]}")") thumbnails
+# echo "Downloading thumbnails" # $( wc -l <<<"$(printf "%s\n" "${THUMBNAILS[@]}")")
+wget --quiet --input-file=- --directory-prefix="$CACHE_DIR" \
+    <<<"$(printf "%s\n" "${THUMBNAILS[@]}")"
+
+## Dialog
+export -f SetWallpaper
+export CACHE_DIR KILLME
+yad --width="820" --height="500" --title="Wallpapers from $SUBREDDIT" --center --window-icon="wallpaper" \
+    --icons --listen --single-click --item-width 0 \
+    --button="Center!zoom-original-symbolic:gsettings set org.gnome.desktop.background picture-options centered" \
+    --button="Scaled!zoom-in-symbolic:gsettings set org.gnome.desktop.background picture-options scaled" \
+    --button="Zoom!zoom-fit-best-symbolic:gsettings set org.gnome.desktop.background picture-options zoom" \
+    --button="Reset!undo:bash -c 'gsettings reset org.gnome.desktop.background picture-uri;gsettings reset org.gnome.desktop.background picture-options'" \
+    --button="Quit!gtk-close:1" \
+    <<<"$(printf "%s\n" "${YAD_ICONS[@]}")" \
+    2>/dev/null
+
+exit 0
