@@ -101,8 +101,8 @@ export CACHE_DIR KILLME
 yad --width="820" --height="500" --title="Wallpapers from $SUBREDDIT" --center --window-icon="wallpaper" \
     --icons --listen --single-click --item-width 0 \
     --button="Center!zoom-original-symbolic:gsettings set org.gnome.desktop.background picture-options centered" \
-    --button="Scaled!zoom-in-symbolic:gsettings set org.gnome.desktop.background picture-options scaled" \
-    --button="Zoom!zoom-fit-best-symbolic:gsettings set org.gnome.desktop.background picture-options zoom" \
+    --button="Fit!zoom-in-symbolic:gsettings set org.gnome.desktop.background picture-options scaled" \
+    --button="Full!zoom-fit-best-symbolic:gsettings set org.gnome.desktop.background picture-options zoom" \
     --button="Reset!undo:bash -c 'gsettings reset org.gnome.desktop.background picture-uri;gsettings reset org.gnome.desktop.background picture-options'" \
     --button="Quit!gtk-close:1" \
     <<<"$(printf "%s\n" "${YAD_ICONS[@]}")" \
